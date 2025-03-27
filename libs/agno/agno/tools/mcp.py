@@ -1,5 +1,7 @@
 from functools import partial
 from typing import Optional
+import shutil
+import sys
 from uuid import uuid4
 
 from agno.agent import Agent
@@ -52,6 +54,20 @@ class MCPTools(Toolkit):
 
         self.session: Optional[ClientSession] = session
         self.server_params: Optional[StdioServerParameters] = server_params
+
+        # Direct fix for npx on Windows (targeting the specific issue)
+        if (
+            self.server_params is not None
+            and hasattr(self.server_params, "command")
+            and self.server_params.command == "npx"
+            and sys.platform == "win32"
+        ):
+            for ext in [".cmd", ".exe", ".bat"]:
+                if npx_path := shutil.which(f"npx{ext}"):
+                    log_debug(f"Resolved npx path on Windows: {npx_path}")
+                    self.server_params.command = npx_path
+                    break
+
         self.available_tools: Optional[ListToolsResult] = None
         self._client = client
         self._stdio_context = None
@@ -72,25 +88,52 @@ class MCPTools(Toolkit):
         if self.server_params is None:
             raise ValueError("server_params must be provided when using as context manager")
 
-        self._stdio_context = stdio_client(self.server_params)  # type: ignore
-        read, write = await self._stdio_context.__aenter__()  # type: ignore
+        try:
+            # The stdio_client should handle platform-specific details, but we manually resolved npx path above
+            self._stdio_context = stdio_client(self.server_params)  # type: ignore
+            read, write = await self._stdio_context.__aenter__()  # type: ignore
 
-        self._session_context = ClientSession(read, write)  # type: ignore
-        self.session = await self._session_context.__aenter__()  # type: ignore
+            self._session_context = ClientSession(read, write)  # type: ignore
+            self.session = await self._session_context.__aenter__()  # type: ignore
 
-        # Initialize with the new session
-        await self.initialize()
-        return self
+            # Initialize with the new session
+            await self.initialize()
+            return self
+        except Exception as e:
+            # Clean up resources on error
+            if self._session_context is not None:
+                try:
+                    await self._session_context.__aexit__(type(e), e, e.__traceback__)
+                except Exception:
+                    pass
+                self.session = None
+                self._session_context = None
+
+            if self._stdio_context is not None:
+                try:
+                    await self._stdio_context.__aexit__(type(e), e, e.__traceback__)
+                except Exception:
+                    pass
+                self._stdio_context = None
+
+            # Re-raise the original exception
+            raise
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit the async context manager."""
         if self._session_context is not None:
-            await self._session_context.__aexit__(exc_type, exc_val, exc_tb)
+            try:
+                await self._session_context.__aexit__(exc_type, exc_val, exc_tb)
+            except Exception:
+                pass
             self.session = None
             self._session_context = None
 
         if self._stdio_context is not None:
-            await self._stdio_context.__aexit__(exc_type, exc_val, exc_tb)
+            try:
+                await self._stdio_context.__aexit__(exc_type, exc_val, exc_tb)
+            except Exception:
+                pass
             self._stdio_context = None
 
         self._initialized = False
@@ -190,7 +233,7 @@ class MCPTools(Toolkit):
 
                 return response_str.strip()
             except Exception as e:
-                logger.exception(f"Failed to call MCP tool '{tool_name}': {e}")
+                logger.error(f"Failed to call MCP tool '{tool_name}': {e}")
                 return f"Error: {e}"
 
         return partial(call_tool, tool_name=tool.name, tool_description=tool.description)
