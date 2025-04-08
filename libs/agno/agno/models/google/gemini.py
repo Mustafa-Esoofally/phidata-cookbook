@@ -1,5 +1,6 @@
 import json
 import time
+import asyncio
 import traceback
 from dataclasses import dataclass
 from os import getenv
@@ -31,6 +32,9 @@ try:
         GoogleSearchRetrieval,
         Part,
         Tool,
+        GenerateVideosConfig,
+        GenerateVideosResponse,
+        Operation,
     )
     from google.genai.types import (
         File as GeminiFile,
@@ -80,6 +84,15 @@ class Gemini(Model):
     response_modalities: Optional[list[str]] = None  # "Text" and/or "Image"
     speech_config: Optional[dict[str, Any]] = None
     request_params: Optional[Dict[str, Any]] = None
+
+    # Video generation parameters (Veo)
+    # Note: Veo access requires allowlisting.
+    video_number_of_videos: int = 1
+    video_fps: Optional[int] = None  # Defaults usually 24
+    video_duration_seconds: Optional[float] = None  # Defaults usually 5
+    video_enhance_prompt: bool = False
+    video_config_kwargs: Optional[Dict[str, Any]] = None
+    video_polling_interval_seconds: int = 20
 
     # Client parameters
     api_key: Optional[str] = None
@@ -170,6 +183,10 @@ class Gemini(Model):
                 "speech_config": self.speech_config,
             }
         )
+
+        # Log if specific response modalities are requested
+        if self.response_modalities:
+            log_info(f"Requesting response modalities: {self.response_modalities}")
 
         if system_message is not None:
             config["system_instruction"] = system_message  # type: ignore
