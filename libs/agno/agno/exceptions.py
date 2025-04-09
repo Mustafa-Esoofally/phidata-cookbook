@@ -75,3 +75,11 @@ class ModelRateLimitError(ModelProviderError):
         self, message: str, status_code: int = 429, model_name: Optional[str] = None, model_id: Optional[str] = None
     ):
         super().__init__(message, status_code, model_name, model_id)
+
+
+class ToolError(AgnoError):
+    """Exception raised when a tool encounters an error during execution."""
+
+    def __init__(self, message: str, tool_name: Optional[str] = None, status_code: int = 500):
+        super().__init__(message, status_code)
+        self.tool_name = tool_name

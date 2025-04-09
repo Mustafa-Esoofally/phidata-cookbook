@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from types import AsyncGeneratorType, GeneratorType
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, Iterator, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
+import json
 
 from agno.exceptions import AgentRunException
 from agno.media import AudioResponse, ImageArtifact
@@ -812,9 +813,41 @@ class Model(ABC):
         self, fc: FunctionCall, success: bool, output: Optional[Union[List[Any], str]], timer: Timer
     ) -> Message:
         """Create a function call result message."""
+        content_value = fc.error
+        image_output_value: Optional[ImageArtifact] = None
+
+        if success:
+            if isinstance(output, dict):
+                # Handle specific dictionary types like ImageArtifact
+                if 'id' in output and 'content' in output and 'mime_type' in output:
+                    # Assume it's a media artifact (like ImageArtifact)
+                    try:
+                        # Parse the dict into an ImageArtifact object
+                        image_output_value = ImageArtifact(**output)
+                        # Provide a summary for the content field
+                        artifact_id = image_output_value.id or 'unknown'
+                        mime_type = image_output_value.mime_type or 'unknown'
+                        content_value = f"Tool executed successfully. Generated artifact ID: {artifact_id}, Type: {mime_type}"
+                    except Exception as e:
+                        log_error(f"Failed to parse tool output as ImageArtifact: {e}")
+                        content_value = f"Tool executed successfully but failed to parse artifact output: {str(output)[:100]}..."
+                else:
+                    # For other dictionaries, try JSON encoding (potential for large size)
+                    try:
+                        content_value = json.dumps(output)
+                    except TypeError:
+                        content_value = str(output) # Fallback
+            elif output is not None and not isinstance(output, (str, list)):
+                 # Fallback for other non-str/list/dict types
+                 content_value = str(output)
+            else:
+                # Use str/list output directly
+                content_value = output
+
         return Message(
             role=self.tool_message_role,
-            content=output if success else fc.error,
+            content=content_value,
+            image_output=image_output_value,
             tool_call_id=fc.call_id,
             tool_name=fc.function.name,
             tool_args=fc.arguments,
