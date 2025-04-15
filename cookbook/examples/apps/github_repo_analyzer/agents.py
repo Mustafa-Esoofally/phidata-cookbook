@@ -5,7 +5,6 @@ GitHub Repository Analyzer Agents
 import logging
 from typing import Optional
 
-import streamlit as st  # Import streamlit for st.error
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.tools.github import GithubTools
@@ -45,7 +44,7 @@ def get_github_chat_agent(repo_name: str, debug_mode: bool = True) -> Optional[A
             model=OpenAIChat(id="gpt-4o"),  # Or your preferred model
             description=formatted_description,
             instructions=formatted_instructions,
-            tools=[GithubTools()],  # Ensure GITHUB_TOKEN is set in env
+            tools=[GithubTools()],
             debug_mode=debug_mode,
             markdown=True,
         )

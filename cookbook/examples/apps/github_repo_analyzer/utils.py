@@ -14,7 +14,7 @@ from github import Github, GithubException
 
 # Import prompts - change from relative to direct import
 # from .prompts import ABOUT_TEXT
-from prompts import ABOUT_TEXT
+from prompts import ABOUT_TEXT, SIDEBAR_EXAMPLE_QUERIES
 
 # Keep only necessary CSS styles
 CUSTOM_CSS = """
@@ -85,53 +85,44 @@ def about_widget() -> None:
     st.sidebar.markdown(ABOUT_TEXT)
 
 
-def get_combined_repositories(
-    token: Optional[str], user_repo_limit: int = 5
-) -> list[str]:
+def get_combined_repositories(user_repo_limit: int = 10) -> list[str]:
     """
     Fetches user repositories (if token provided) and combines them with
     a predefined list of popular repositories.
 
     Args:
-        token: Optional GitHub Personal Access Token.
         user_repo_limit: Max number of user-specific repos to fetch.
 
     Returns:
         A combined list of unique repository names.
     """
     user_repos = []
-    if token:
-        try:
-            g = Github(token)
-            user = g.get_user()
-            logging.info(f"Authenticated as GitHub user: {user.login}")
-            repos = user.get_repos(
-                affiliation="owner,collaborator,organization_member",
-                sort="updated",
-                direction="desc",
-            )
-
-            count = 0
-            for repo in repos:
-                if count >= user_repo_limit:
-                    break
-                user_repos.append(repo.full_name)
-                count += 1
-            logging.info(f"Fetched {len(user_repos)} user repositories: {user_repos}")
-        except GithubException as e:
-            logging.error(
-                f"GitHub API error while fetching user repositories: {e.status} - {e.data}"
-            )
-            # Don't show error in UI here, let the main app handle UI feedback if needed
-        except Exception as e:
-            logging.error(
-                f"An unexpected error occurred while fetching user repositories: {e}"
-            )
-            # Don't show error in UI here
-    else:
-        logging.warning(
-            "GitHub token not provided via environment variable. Only showing popular repositories."
+    try:
+        g = Github()
+        user = g.get_user()
+        logging.info(f"Authenticated as GitHub user: {user.login}")
+        repos = user.get_repos(
+            affiliation="owner,collaborator,organization_member",
+            sort="updated",
+            direction="desc",
         )
+        count = 0
+        for repo in repos:
+            if count >= user_repo_limit:
+                break
+            user_repos.append(repo.full_name)
+            count += 1
+        logging.info(f"Fetched {len(user_repos)} user repositories: {user_repos}")
+    except GithubException as e:
+        logging.error(
+            f"GitHub API error while fetching user repositories: {e.status} - {e.data}"
+        )
+        # Don't show error in UI here, let the main app handle UI feedback if needed
+    except Exception as e:
+        logging.error(
+            f"An unexpected error occurred while fetching user repositories: {e}"
+        )
+        # Don't show error in UI here
 
     # Combine user repos with popular repos, ensuring uniqueness and order
     combined_list = []
@@ -153,3 +144,61 @@ def get_combined_repositories(
         f"Final combined repository list ({len(combined_list)}): {combined_list}"
     )
     return combined_list
+
+
+def render_sidebar() -> None:
+    """Renders the sidebar UI components."""
+    # Fetch repositories if not already in session state
+    if "repo_list" not in st.session_state or not st.session_state.repo_list:
+        with st.spinner("Fetching repositories..."):
+            st.session_state.repo_list = get_combined_repositories(user_repo_limit=5)
+            if not st.session_state.repo_list:
+                st.sidebar.warning("Could not load any repositories.")
+
+    # Repository Selection Dropdown
+    if st.session_state.repo_list:
+        st.header("Select Repository")
+        default_repo = "agno-agi/agno"
+        options = st.session_state.repo_list
+        try:
+            default_index = (
+                options.index(default_repo) if default_repo in options else 0
+            )
+        except ValueError:
+            default_index = 0
+
+        current_selection_index = default_index
+        if st.session_state.get("selected_repo") in options:
+            try:
+                current_selection_index = options.index(st.session_state.selected_repo)
+            except ValueError:
+                st.session_state.selected_repo = None
+                st.session_state.agent = None
+                logging.warning(
+                    "Previously selected repo not found in current list. Resetting."
+                )
+                st.rerun()
+
+        selected_repo = st.selectbox(
+            "Choose a repository to chat with:",
+            options=options,
+            index=current_selection_index,
+            key="repo_selector",
+        )
+
+        if selected_repo != st.session_state.get("selected_repo"):
+            st.session_state.selected_repo = selected_repo
+            st.session_state.messages = []
+            st.session_state.agent = None
+            logging.info(f"Selected repository changed to: {selected_repo}")
+            st.rerun()
+
+    # Example Queries
+    st.markdown("---")
+    st.markdown("### Example Queries")
+    for query in SIDEBAR_EXAMPLE_QUERIES:
+        st.markdown(f"- {query}")
+
+    # About Widget
+    st.markdown("---")
+    about_widget()
